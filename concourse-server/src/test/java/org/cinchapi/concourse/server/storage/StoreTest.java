@@ -1,25 +1,17 @@
 /*
- * The MIT License (MIT)
- * 
- * Copyright (c) 2013-2015 Jeff Nelson, Cinchapi Software Collective
- * 
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- * 
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- * 
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
+ * Copyright (c) 2013-2015 Cinchapi, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 package org.cinchapi.concourse.server.storage;
 
@@ -73,7 +65,7 @@ import com.google.common.collect.TreeMultimap;
 /**
  * Base unit tests for {@link Store} services.
  * 
- * @author jnelson
+ * @author Jeff Nelson
  */
 @RunWith(Theories.class)
 public abstract class StoreTest extends ConcourseBaseTest {
@@ -389,7 +381,7 @@ public abstract class StoreTest extends ConcourseBaseTest {
                 }
             }
         }
-        Assert.assertEquals(data.asMap(), store.browse(record));
+        Assert.assertEquals(data.asMap(), store.select(record));
     }
 
     @Test
@@ -414,7 +406,7 @@ public abstract class StoreTest extends ConcourseBaseTest {
                 remove(entry.getKey(), entry.getValue(), record);
             }
         }
-        Assert.assertEquals(data.asMap(), store.browse(record));
+        Assert.assertEquals(data.asMap(), store.select(record));
     }
 
     @Test
@@ -455,7 +447,7 @@ public abstract class StoreTest extends ConcourseBaseTest {
                 remove(entry.getKey(), entry.getValue(), record);
             }
         }
-        Assert.assertEquals(data.asMap(), store.browse(record, timestamp));
+        Assert.assertEquals(data.asMap(), store.select(record, timestamp));
 
     }
 
@@ -474,7 +466,7 @@ public abstract class StoreTest extends ConcourseBaseTest {
             }
         }
         Map<String, Set<TObject>> result = Variables.register("data",
-                store.browse(record));
+                store.select(record));
         String previous = null;
         for (String current : result.keySet()) {
             if(previous != null) {
@@ -509,7 +501,7 @@ public abstract class StoreTest extends ConcourseBaseTest {
                 }
             }
         }
-        Assert.assertEquals(data.asMap(), store.browse(record, timestamp));
+        Assert.assertEquals(data.asMap(), store.select(record, timestamp));
     }
 
     @Test
@@ -692,7 +684,7 @@ public abstract class StoreTest extends ConcourseBaseTest {
         long record = TestData.getLong();
         add(key, value, record);
         remove(key, value, record);
-        Assert.assertFalse(store.fetch(key, record).contains(value));
+        Assert.assertFalse(store.select(key, record).contains(value));
     }
 
     @Test
@@ -703,7 +695,7 @@ public abstract class StoreTest extends ConcourseBaseTest {
         add(key, value, record);
         long timestamp = Time.now();
         remove(key, value, record);
-        Assert.assertTrue(store.fetch(key, record, timestamp).contains(value));
+        Assert.assertTrue(store.select(key, record, timestamp).contains(value));
     }
 
     @Test
@@ -714,7 +706,7 @@ public abstract class StoreTest extends ConcourseBaseTest {
         for (TObject value : values) {
             add(key, value, record);
         }
-        Assert.assertEquals(values, store.fetch(key, record));
+        Assert.assertEquals(values, store.select(key, record));
     }
 
     @Test
@@ -733,7 +725,7 @@ public abstract class StoreTest extends ConcourseBaseTest {
                 remove(key, value, record);
             }
         }
-        Assert.assertEquals(values, store.fetch(key, record));
+        Assert.assertEquals(values, store.select(key, record));
     }
 
     @Test
@@ -770,7 +762,7 @@ public abstract class StoreTest extends ConcourseBaseTest {
                 valuesCopy.remove(value);
             }
         }
-        Assert.assertEquals(values, store.fetch(key, record, timestamp));
+        Assert.assertEquals(values, store.select(key, record, timestamp));
     }
 
     @Test
@@ -790,7 +782,7 @@ public abstract class StoreTest extends ConcourseBaseTest {
             otherValues.add(value);
             add(key, value, record);
         }
-        Assert.assertEquals(values, store.fetch(key, record, timestamp));
+        Assert.assertEquals(values, store.select(key, record, timestamp));
     }
 
     @Test
@@ -799,7 +791,7 @@ public abstract class StoreTest extends ConcourseBaseTest {
         TObject value = TestData.getTObject();
         long record = TestData.getLong();
         add(key, value, record);
-        Assert.assertTrue(store.fetch(key, record).contains(value));
+        Assert.assertTrue(store.select(key, record).contains(value));
     }
 
     @Test
@@ -809,12 +801,12 @@ public abstract class StoreTest extends ConcourseBaseTest {
         long record = TestData.getLong();
         long timestamp = Time.now();
         add(key, value, record);
-        Assert.assertFalse(store.fetch(key, record, timestamp).contains(value));
+        Assert.assertFalse(store.select(key, record, timestamp).contains(value));
     }
 
     @Test
     public void testFetchEmpty() {
-        Assert.assertTrue(store.fetch(TestData.getString(), TestData.getLong())
+        Assert.assertTrue(store.select(TestData.getString(), TestData.getLong())
                 .isEmpty());
     }
 
@@ -962,8 +954,8 @@ public abstract class StoreTest extends ConcourseBaseTest {
         value = "string3";
         add(key, Convert.javaToThrift(Tag.create(value)), record);
         add(key, Convert.javaToThrift(Tag.create(value)), record);
-        Variables.register("test", store.fetch(key, record));
-        Assert.assertEquals(3, store.fetch(key, record).size());
+        Variables.register("test", store.select(key, record));
+        Assert.assertEquals(3, store.select(key, record).size());
     }
 
     @Test
@@ -1650,7 +1642,7 @@ public abstract class StoreTest extends ConcourseBaseTest {
         while (it.hasNext()) {
             long record = it.next();
             if(TestData.getInt() % 3 == 0) {
-                TObject value = store.fetch(key, record).iterator().next();
+                TObject value = store.select(key, record).iterator().next();
                 it.remove();
                 remove(key, value, record);
             }
@@ -1853,7 +1845,7 @@ public abstract class StoreTest extends ConcourseBaseTest {
     /**
      * An item that is used in a search test
      * 
-     * @author jnelson
+     * @author Jeff Nelson
      */
     private class SearchTestItem {
 
@@ -1891,7 +1883,7 @@ public abstract class StoreTest extends ConcourseBaseTest {
     /**
      * List of search types
      * 
-     * @author jnelson
+     * @author Jeff Nelson
      */
     private enum SearchType {
         PREFIX, INFIX, SUFFIX, FULL

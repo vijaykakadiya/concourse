@@ -1,25 +1,17 @@
 /*
- * The MIT License (MIT)
- * 
- * Copyright (c) 2013-2015 Jeff Nelson, Cinchapi Software Collective
- * 
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- * 
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- * 
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
+ * Copyright (c) 2013-2015 Cinchapi, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 package org.cinchapi.concourse.server.storage;
 
@@ -63,7 +55,7 @@ import com.google.common.collect.TreeRangeSet;
  * <em>just in time locking</em> where destination resources are only locked
  * when its time to commit the operation.
  * 
- * @author jnelson
+ * @author Jeff Nelson
  */
 public class AtomicOperation extends BufferedStore implements
         VersionChangeListener {
@@ -206,7 +198,7 @@ public class AtomicOperation extends BufferedStore implements
     }
 
     @Override
-    public Map<String, Set<TObject>> browse(long record)
+    public Map<String, Set<TObject>> select(long record)
             throws AtomicStateException {
         checkState();
         Token token = Token.wrap(record);
@@ -216,10 +208,10 @@ public class AtomicOperation extends BufferedStore implements
     }
 
     @Override
-    public Map<String, Set<TObject>> browse(long record, long timestamp)
+    public Map<String, Set<TObject>> select(long record, long timestamp)
             throws AtomicStateException {
         checkState();
-        return super.browse(record, timestamp);
+        return super.select(record, timestamp);
     }
 
     @Override
@@ -257,6 +249,9 @@ public class AtomicOperation extends BufferedStore implements
             if(grabLocks() && finalizing.compareAndSet(false, true)) {
                 doCommit();
                 releaseLocks();
+                if(destination instanceof Transaction){
+                    ((Transaction) destination).onCommit(this);
+                }
                 return true;
             }
             else {
@@ -281,7 +276,7 @@ public class AtomicOperation extends BufferedStore implements
     }
 
     @Override
-    public Set<TObject> fetch(String key, long record)
+    public Set<TObject> select(String key, long record)
             throws AtomicStateException {
         checkState();
         Token token = Token.wrap(key, record);
@@ -291,10 +286,10 @@ public class AtomicOperation extends BufferedStore implements
     }
 
     @Override
-    public Set<TObject> fetch(String key, long record, long timestamp)
+    public Set<TObject> select(String key, long record, long timestamp)
             throws AtomicStateException {
         checkState();
-        return super.fetch(key, record, timestamp);
+        return super.select(key, record, timestamp);
     }
 
     @Override
@@ -531,7 +526,7 @@ public class AtomicOperation extends BufferedStore implements
      * Encapsulates the logic to efficiently associate keys with ranges for the
      * purposes of JIT range locking.
      * 
-     * @author jnelson
+     * @author Jeff Nelson
      */
     private class RangeHolder {
 
@@ -607,10 +602,10 @@ public class AtomicOperation extends BufferedStore implements
      * metadata that can be serialized to disk. The AtomicOperation grabs a
      * collection of LockDescriptions when it goes to commit.
      * 
-     * @author jnelson
+     * @author Jeff Nelson
      */
     protected static final class LockDescription implements Byteable {
-        
+
         /**
          * Return the appropriate {@link LockDescription} that will provide
          * coverage for {@code token}

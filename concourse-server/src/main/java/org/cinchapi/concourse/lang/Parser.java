@@ -1,25 +1,17 @@
 /*
- * The MIT License (MIT)
+ * Copyright (c) 2013-2015 Cinchapi, Inc.
  * 
- * Copyright (c) 2013-2015 Jeff Nelson, Cinchapi Software Collective
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  * 
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
+ * http://www.apache.org/licenses/LICENSE-2.0
  * 
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- * 
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 package org.cinchapi.concourse.lang;
 
@@ -31,11 +23,13 @@ import java.util.List;
 import java.util.ListIterator;
 import java.util.Queue;
 
+import org.apache.commons.lang.StringUtils;
 import org.cinchapi.concourse.lang.ast.AST;
 import org.cinchapi.concourse.lang.ast.AndTree;
 import org.cinchapi.concourse.lang.ast.ExpressionTree;
 import org.cinchapi.concourse.lang.ast.OrTree;
 import org.cinchapi.concourse.thrift.Operator;
+import org.cinchapi.concourse.util.Strings;
 
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
@@ -44,7 +38,7 @@ import com.google.common.collect.Lists;
  * The {@link Parser} is a tool that operates on various aspects of the
  * language.
  * 
- * @author jnelson
+ * @author Jeff Nelson
  */
 public final class Parser {
 
@@ -165,6 +159,119 @@ public final class Parser {
     }
 
     /**
+     * Convert a valid and well-formed CCL string into aQueue in postfix
+     * notation.
+     * <p>
+     * NOTE: This method will group non-conjunctive symbols into
+     * {@link Expression} objects.
+     * </p>
+     * 
+     * @param ccl
+     * @return the queue in postfix notation
+     */
+    public static Queue<PostfixNotationSymbol> toPostfixNotation(String ccl) {
+        // This method uses a value buffer to correct cases when a string value
+        // is specified without quotes (because its a common mistake to make).
+        // If an operator other than BETWEEN is specified, we use logic that
+        // will buffer all the subsequent tokens until we reach a (parenthesis),
+        // (conjunction) or (at) and assume that the tokens belong to the same
+        // value.
+        ccl = ccl.replace("(", "( ");
+        ccl = ccl.replace(")", " )");
+        String[] toks = Strings.splitButRespectQuotes(ccl);
+        List<Symbol> symbols = Lists.newArrayListWithExpectedSize(toks.length);
+        GuessState guess = GuessState.KEY;
+        StringBuilder buffer = null;
+        for (String tok : toks) {
+            if(tok.equals("(") || tok.equals(")")) {
+                addBufferedValue(buffer, symbols);
+                symbols.add(ParenthesisSymbol.parse(tok));
+            }
+            else if(tok.equalsIgnoreCase("and")) {
+                addBufferedValue(buffer, symbols);
+                symbols.add(ConjunctionSymbol.AND);
+                guess = GuessState.KEY;
+            }
+            else if(tok.equalsIgnoreCase("or")) {
+                addBufferedValue(buffer, symbols);
+                symbols.add(ConjunctionSymbol.OR);
+                guess = GuessState.KEY;
+            }
+            else if(tok.equalsIgnoreCase("at")) {
+                addBufferedValue(buffer, symbols);
+                guess = GuessState.TIMESTAMP;
+            }
+            else if(tok.equalsIgnoreCase("where")) {
+                continue;
+            }
+            else if(StringUtils.isBlank(tok)) {
+                continue;
+            }
+            else if(guess == GuessState.KEY) {
+                symbols.add(KeySymbol.parse(tok));
+                guess = GuessState.OPERATOR;
+            }
+            else if(guess == GuessState.OPERATOR) {
+                OperatorSymbol symbol = OperatorSymbol.parse(tok);
+                symbols.add(symbol);
+                if(symbol.getOperator() != Operator.BETWEEN) {
+                    buffer = new StringBuilder();
+                }
+                guess = GuessState.VALUE;
+            }
+            else if(guess == GuessState.VALUE) {
+                if(buffer != null) {
+                    buffer.append(tok).append(" ");
+                }
+                else {
+                    symbols.add(ValueSymbol.parse(tok));
+                }
+            }
+            else if(guess == GuessState.TIMESTAMP) {
+                symbols.add(TimestampSymbol.parse(tok));
+            }
+            else {
+                throw new IllegalStateException();
+            }
+        }
+        addBufferedValue(buffer, symbols);
+        return toPostfixNotation(symbols);
+    }
+
+    /**
+     * An the appropriate {@link AST} node to the {@code stack} based on
+     * {@code operator}.
+     * 
+     * @param stack
+     * @param operator
+     */
+    private static void addASTNode(Deque<AST> stack, Symbol operator) {
+        AST right = stack.pop();
+        AST left = stack.pop();
+        if(operator == ConjunctionSymbol.AND) {
+            stack.push(AndTree.create(left, right));
+        }
+        else {
+            stack.push(OrTree.create(left, right));
+        }
+    }
+
+    /**
+     * This is a helper method for {@link #toPostfixNotation(String)} that
+     * contains the logic to create a ValueSymbol from a buffered value.
+     * @param buffer
+     * @param symbols
+     */
+    private static void addBufferedValue(StringBuilder buffer,
+            List<Symbol> symbols) {
+        if(buffer != null && buffer.length() > 0) {
+            buffer.delete(buffer.length() - 1, buffer.length());
+            symbols.add(ValueSymbol.parse(buffer.toString()));
+            buffer.delete(0, buffer.length());
+        }
+    }
+
+    /**
      * Go through a list of symbols and group the expressions together in a
      * {@link Expression} object.
      * 
@@ -217,24 +324,16 @@ public final class Parser {
         }
     }
 
-    /**
-     * An the appropriate {@link AST} node to the {@code stack} based on
-     * {@code operator}.
-     * 
-     * @param stack
-     * @param operator
-     */
-    private static void addASTNode(Deque<AST> stack, Symbol operator) {
-        AST right = stack.pop();
-        AST left = stack.pop();
-        if(operator == ConjunctionSymbol.AND) {
-            stack.push(AndTree.create(left, right));
-        }
-        else {
-            stack.push(OrTree.create(left, right));
-        }
-    }
-
     private Parser() {/* noop */}
+
+    /**
+     * An enum that tracks what the parser guesses the next token to be in the
+     * {@link #toPostfixNotation(String)} method.
+     * 
+     * @author Jeff Nelson
+     */
+    private enum GuessState {
+        KEY, OPERATOR, TIMESTAMP, VALUE
+    }
 
 }

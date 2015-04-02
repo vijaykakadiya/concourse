@@ -1,25 +1,17 @@
 /*
- * The MIT License (MIT)
+ * Copyright (c) 2013-2015 Cinchapi, Inc.
  * 
- * Copyright (c) 2013-2015 Jeff Nelson, Cinchapi Software Collective
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  * 
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
+ * http://www.apache.org/licenses/LICENSE-2.0
  * 
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- * 
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 package org.cinchapi.concourse.server.storage.cache;
 
@@ -50,7 +42,7 @@ import com.google.common.base.Throwables;
  * time while abstracting away the notion of funnels, etc.
  * </p>
  * 
- * @author jnelson
+ * @author Jeff Nelson
  */
 @ThreadSafe
 public class BloomFilter implements Syncable {
@@ -88,6 +80,42 @@ public class BloomFilter implements Syncable {
      */
     public static BloomFilter create(String file, int expectedInsertions) {
         return new BloomFilter(file, expectedInsertions);
+    }
+
+    /**
+     * Create a new concurrent BloomFilter with enough capacity for
+     * {@code expectedInsertions}.
+     * <p>
+     * Note that overflowing a BloomFilter with significantly more elements than
+     * specified, will result in its saturation, and a sharp deterioration of
+     * its false positive probability (source:
+     * {@link BloomFilter#create(com.google.common.hash.Funnel, int)})
+     * <p>
+     * 
+     * @param expectedInsertions
+     * @return the BloomFilter
+     */
+    public static BloomFilter createConcurrent(int expectedInsertions) {
+        return new ConcurrentBloomFilter(null, expectedInsertions);
+    }
+
+    /**
+     * Create a new concurrent BloomFilter with enough capacity for
+     * {@code expectedInsertions}.
+     * <p>
+     * Note that overflowing a BloomFilter with significantly more elements than
+     * specified, will result in its saturation, and a sharp deterioration of
+     * its false positive probability (source:
+     * {@link BloomFilter#create(com.google.common.hash.Funnel, int)})
+     * <p>
+     * 
+     * @param file
+     * @param expectedInsertions
+     * @return the BloomFilter
+     */
+    public static BloomFilter createConcurrent(String file,
+            int expectedInsertions) {
+        return new ConcurrentBloomFilter(file, expectedInsertions);
     }
 
     /**
@@ -158,7 +186,7 @@ public class BloomFilter implements Syncable {
      * @param file
      * @param source
      */
-    private BloomFilter(String file,
+    protected BloomFilter(String file,
             com.google.common.hash.BloomFilter<Composite> source) {
         this.source = source;
         this.file = file;
@@ -169,7 +197,7 @@ public class BloomFilter implements Syncable {
      * 
      * @param expectedInsertions
      */
-    private BloomFilter(String file, int expectedInsertions) {
+    protected BloomFilter(String file, int expectedInsertions) {
         this.source = com.google.common.hash.BloomFilter.create(
                 ByteableFunnel.INSTANCE, expectedInsertions); // uses 3% false
                                                               // positive
@@ -260,10 +288,10 @@ public class BloomFilter implements Syncable {
         Preconditions.checkState(file != null, "Cannot sync a "
                 + "BloomFilter that does not have an associated file");
         FileChannel channel = FileSystem.getFileChannel(file);
-        long stamp = lock.tryOptimisticRead();
+        long stamp = tryOptimisticRead();
         Serializables.write(source, channel); // CON-164
-        if(!lock.validate(stamp)) {
-            stamp = lock.readLock();
+        if(!validate(stamp)) {
+            stamp = readLock();
             try {
                 channel.position(0);
                 Serializables.write(source, channel); // CON-164
@@ -272,7 +300,7 @@ public class BloomFilter implements Syncable {
                 throw Throwables.propagate(e);
             }
             finally {
-                lock.unlockRead(stamp);
+                unlockRead(stamp);
             }
         }
         FileSystem.closeFileChannel(channel);
@@ -286,15 +314,15 @@ public class BloomFilter implements Syncable {
      * @return {@code true} if the composite might exist
      */
     private boolean mightContain(Composite composite) {
-        long stamp = lock.tryOptimisticRead();
+        long stamp = tryOptimisticRead();
         boolean mightContain = source.mightContain(composite);
-        if(!lock.validate(stamp)) {
-            stamp = lock.readLock();
+        if(!validate(stamp)) {
+            stamp = readLock();
             try {
                 mightContain = source.mightContain(composite);
             }
             finally {
-                lock.unlockRead(stamp);
+                unlockRead(stamp);
             }
         }
         return mightContain;
@@ -308,12 +336,72 @@ public class BloomFilter implements Syncable {
      *         of the {@code composite}
      */
     private boolean put(Composite composite) {
-        long stamp = lock.writeLock();
+        long stamp = writeLock();
         try {
             return source.put(composite);
         }
         finally {
-            lock.unlockWrite(stamp);
+            unlockWrite(stamp);
         }
     }
+
+    /**
+     * Grabs the read {@link StampedLock} {@code lock} and return the
+     * {@code stamp}.
+     * 
+     * @return {@code stamp}
+     */
+    protected long readLock() {
+        return lock.readLock();
+    }
+
+    /**
+     * Returns stamp using {@link #tryOptimisticRead() tryOptimisticRead()}
+     * 
+     * @return {@code stamp}
+     */
+    protected long tryOptimisticRead() {
+        return lock.tryOptimisticRead();
+    }
+
+    /**
+     * Release the read {@link StampedLock} {@code lock} for {@code stamp}.
+     * 
+     * @param stamp
+     */
+    protected void unlockRead(long stamp) {
+        lock.unlockRead(stamp);
+    }
+
+    /**
+     * Release the write {@link StampedLock} {@code lock} for {@code stamp}.
+     * 
+     * @param stamp
+     */
+    protected void unlockWrite(long stamp) {
+        lock.unlockWrite(stamp);
+    }
+
+    /**
+     * Checks whether the lock has not been exclusively acquired since issuance
+     * of the given stamp using {@link #validate(long) validate(long stamp)}
+     * method.
+     * 
+     * @param stamp
+     * @return boolean
+     */
+    protected boolean validate(long stamp) {
+        return lock.validate(stamp);
+    }
+
+    /**
+     * Grabs the write {@link StampedLock} {@code lock} and return the
+     * {@code stamp}.
+     * 
+     * @return {@code stamp}
+     */
+    protected long writeLock() {
+        return lock.writeLock();
+    }
+
 }

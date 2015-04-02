@@ -1,32 +1,24 @@
 /*
- * The MIT License (MIT)
+ * Copyright (c) 2013-2015 Cinchapi, Inc.
  * 
- * Copyright (c) 2013-2015 Jeff Nelson, Cinchapi Software Collective
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  * 
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
+ * http://www.apache.org/licenses/LICENSE-2.0
  * 
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- * 
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 package org.cinchapi.concourse.shell;
 
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -62,19 +54,18 @@ import org.codehaus.groovy.control.CompilationFailedException;
 
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
-import com.clutch.dates.StringToTime;
 import com.google.common.base.Stopwatch;
 import com.google.common.base.Strings;
+import com.google.common.base.Throwables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
-import com.google.common.primitives.Longs;
 
 /**
  * The main program runner for the ConcourseShell client. ConcourseShell wraps a
  * connection to a ConcourseServer inside of a {@link GroovyShell}, which allows
  * for rich interaction with Concourse in a scripting environment.
  * 
- * @author jnelson
+ * @author Jeff Nelson
  */
 public final class ConcourseShell {
 
@@ -147,13 +138,16 @@ public final class ConcourseShell {
                         }
                     }
                     catch (HelpRequest e) {
-                        Process p = Runtime.getRuntime().exec(
-                                new String[] {
-                                        "sh",
-                                        "-c",
-                                        "echo \"" + HELP_TEXT
-                                                + "\" | less > /dev/tty" });
-                        p.waitFor();
+                        String text = getHelpText(e.topic);
+                        if(!Strings.isNullOrEmpty(text)) {
+                            Process p = Runtime.getRuntime().exec(
+                                    new String[] {
+                                            "sh",
+                                            "-c",
+                                            "echo \"" + text
+                                                    + "\" | less > /dev/tty" });
+                            p.waitFor();
+                        }
                         cash.console.getHistory().removeLast();
                     }
                     catch (ExitRequest e) {
@@ -268,6 +262,41 @@ public final class ConcourseShell {
     }
 
     /**
+     * Return the help text for a given {@code topic}.
+     * 
+     * @param topic
+     * @return the help text
+     */
+    private static String getHelpText(String topic) {
+        topic = Strings.isNullOrEmpty(topic) ? "man" : topic;
+        topic = topic.toLowerCase();
+        InputStream in = ConcourseShell.class.getResourceAsStream("/" + topic);
+        if(in == null) {
+            System.err.println("No help entry for " + topic);
+            return null;
+        }
+        else {
+            try {
+                BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(in));
+                StringBuilder builder = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    line = line.replaceAll("\"", "\\\\\"");
+                    builder.append(line).append(
+                            System.getProperty("line.separator"));
+                }
+                String text = builder.toString().trim();
+                reader.close();
+                return text;
+            }
+            catch (IOException e) {
+                throw Throwables.propagate(e);
+            }
+        }
+    }
+
+    /**
      * A cache of the API methods that are accessible in CaSH.
      */
     private static String[] ACCESSIBLE_API_METHODS = null;
@@ -279,11 +308,6 @@ public final class ConcourseShell {
     private static List<String> BANNED_CHAR_SEQUENCES = Lists.newArrayList(
             "concourse.exit()", "concourse.username", "concourse.password",
             "concourse.client");
-
-    /**
-     * The text that is displayed when the user requests HELP.
-     */
-    private static String HELP_TEXT = "";
 
     /**
      * A list which contains all of the accessible API methods. This list is
@@ -316,15 +340,7 @@ public final class ConcourseShell {
 
         @Override
         public Timestamp call(Object arg) {
-            if(Longs.tryParse(arg.toString()) != null) {
-                // We should assume that the timestamp is in microseconds since
-                // that is the output format used in ConcourseShell
-                return Timestamp.fromMicros(Long.parseLong(arg.toString()));
-            }
-            else {
-                return Timestamp.fromJoda(StringToTime.parseDateTime(arg
-                        .toString()));
-            }
+            return Timestamp.parse(arg.toString());
         }
 
     };
@@ -342,26 +358,6 @@ public final class ConcourseShell {
         }
 
     };
-
-    static {
-        try {
-            BufferedReader reader = new BufferedReader(new InputStreamReader(
-                    ConcourseShell.class.getResourceAsStream("/man")));
-            String line;
-            while ((line = reader.readLine()) != null) {
-                line = line.replaceAll("\"", "\\\\\"");
-                HELP_TEXT += line + System.getProperty("line.separator");
-            }
-            HELP_TEXT = HELP_TEXT.trim();
-            reader.close();
-        }
-        catch (FileNotFoundException e) {
-            e.printStackTrace();
-        }
-        catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
 
     /**
      * The client connection to Concourse.
@@ -454,8 +450,16 @@ public final class ConcourseShell {
         if(input.equalsIgnoreCase("exit")) {
             throw new ExitRequest();
         }
-        else if(input.equalsIgnoreCase("help") || input.equalsIgnoreCase("man")) {
-            throw new HelpRequest();
+        else if(input.toLowerCase().startsWith("help")
+                || input.toLowerCase().startsWith("man")) {
+            String[] toks = input.split(" ");
+            if(toks.length == 1) {
+                throw new HelpRequest();
+            }
+            else {
+                String topic = toks[1];
+                throw new HelpRequest(topic);
+            }
         }
         else if(containsBannedCharSequence(input)) {
             throw new EvaluationException("Cannot evaluate input because "
@@ -471,9 +475,10 @@ public final class ConcourseShell {
                 Object value = groovy.evaluate(input, "ConcourseShell");
                 watch.stop();
                 long elapsed = watch.elapsed(TimeUnit.MILLISECONDS);
+                double seconds = elapsed / 1000.0;
                 if(value != null) {
-                    result.append("Returned '" + value + "' in " + elapsed
-                            + " ms");
+                    result.append("Returned '" + value + "' in " + seconds
+                            + " sec");
                 }
                 else {
                     result.append(format("Completed in {0} ms", elapsed));
@@ -552,7 +557,7 @@ public final class ConcourseShell {
     /**
      * The options that can be passed to the main method of this script.
      * 
-     * @author jnelson
+     * @author Jeff Nelson
      */
     private static class Options {
 

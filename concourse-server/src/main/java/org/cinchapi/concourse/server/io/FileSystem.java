@@ -1,25 +1,17 @@
 /*
- * The MIT License (MIT)
+ * Copyright (c) 2013-2015 Cinchapi, Inc.
  * 
- * Copyright (c) 2013-2015 Jeff Nelson, Cinchapi Software Collective
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  * 
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
+ * http://www.apache.org/licenses/LICENSE-2.0
  * 
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- * 
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 package org.cinchapi.concourse.server.io;
 
@@ -30,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileChannel.MapMode;
+import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.DirectoryNotEmptyException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.FileSystems;
@@ -44,13 +37,15 @@ import org.cinchapi.concourse.util.Logger;
 import com.google.common.base.Throwables;
 import com.google.common.collect.Sets;
 
+import static com.google.common.base.Preconditions.checkState;
+
 /**
  * Interface to the underlying filesystem which provides methods to perform file
  * based operations without having to deal with the annoyance of checked
  * exceptions or the awkward {@link Path} API. Using this class will help
  * produce more streamlined and readable code.
  * 
- * @author jnelson
+ * @author Jeff Nelson
  */
 public final class FileSystem {
 
@@ -211,6 +206,25 @@ public final class FileSystem {
     }
 
     /**
+     * Return the home directory of the parent process for this JVM.
+     * 
+     * @return the home directory
+     */
+    public static String getUserHome() {
+        return USER_HOME;
+    }
+
+    /**
+     * Get the working directory of this JVM, which is the directory from which
+     * the process is launched.
+     * 
+     * @return the working directory
+     */
+    public static String getWorkingDirectory() {
+        return WORKING_DIRECTORY;
+    }
+
+    /**
      * Return {@code true} in the filesystem contains {@code dir} and it is
      * a directory.
      * 
@@ -232,6 +246,32 @@ public final class FileSystem {
     public static boolean hasFile(String file) {
         Path path = Paths.get(file);
         return Files.exists(path) && !Files.isDirectory(path);
+    }
+
+    /**
+     * Lock the file or directory specified in {@code path} for use in this JVM
+     * process. If the lock cannot be acquired, an exception is thrown.
+     * 
+     * @param path
+     */
+    public static void lock(String path) {
+        if(Files.isDirectory(Paths.get(path))) {
+            lock(path + File.separator + "concourse.lock");
+        }
+        else {
+            try {
+                checkState(getFileChannel(path).tryLock() != null,
+                        "Unable to grab lock for %s because another "
+                                + "Concourse Server process is using it", path);
+            }
+            catch (OverlappingFileLockException e) {
+                Logger.warn("Trying to lock {}, but the current "
+                        + "JVM is already the owner", path);
+            }
+            catch (IOException e) {
+                throw Throwables.propagate(e);
+            }
+        }
     }
 
     /**
@@ -364,17 +404,18 @@ public final class FileSystem {
      * The user's home directory, which is used to expand path names with "~"
      * (tilde).
      */
-    private static String USER_HOME = System.getProperty("user.home");
+    private static final String USER_HOME = System.getProperty("user.home");
 
     /**
      * The working directory from which the current JVM process was launched.
      */
-    private static String WORKING_DIRECTORY = System.getProperty("user.dir");
-
+    private static final String WORKING_DIRECTORY = System
+            .getProperty("user.dir");
+    
     /**
      * The base path that is used to resolve and normalize other relative paths.
      */
-    private static Path BASE_PATH = FileSystems.getDefault().getPath(
+    private static final Path BASE_PATH = FileSystems.getDefault().getPath(
             WORKING_DIRECTORY);
 
     private FileSystem() {}

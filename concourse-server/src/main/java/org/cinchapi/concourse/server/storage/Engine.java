@@ -1,25 +1,17 @@
 /*
- * The MIT License (MIT)
- * 
- * Copyright (c) 2013-2015 Jeff Nelson, Cinchapi Software Collective
- * 
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- * 
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- * 
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
+ * Copyright (c) 2013-2015 Cinchapi, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 package org.cinchapi.concourse.server.storage;
 
@@ -87,7 +79,7 @@ import static com.google.common.base.Preconditions.*;
  * performance. The buffering system provides full CD guarantees.
  * </p>
  * 
- * @author jnelson
+ * @author Jeff Nelson
  */
 @ThreadSafe
 public final class Engine extends BufferedStore implements
@@ -160,6 +152,15 @@ public final class Engine extends BufferedStore implements
                                                 // thread that sleeps is faster
                                                 // than using an
                                                 // ExecutorService.
+
+    /**
+     * A flag that indicates whether the {@link BufferTransportThread} is
+     * actively doing work at the moment. This flag is necessary so we don't
+     * interrupt the thread if it appears to be hung when it is actually just
+     * busy doing a lot of work.
+     */
+    private final AtomicBoolean bufferTransportThreadIsDoingWork = new AtomicBoolean(
+            false);
 
     /**
      * A flag that indicates that the {@link BufferTransportThread} is currently
@@ -242,15 +243,6 @@ public final class Engine extends BufferedStore implements
      * the buffer suggests. This is mainly used for testing.
      */
     protected int bufferTransportThreadSleepInMs = 0; // visible for testing
-
-    /**
-     * A flag that indicates whether the {@link BufferTransportThread} is
-     * actively doing work at the moment. This flag is necessary so we don't
-     * interrupt the thread if it appears to be hung when it is actually just
-     * busy doing a lot of work.
-     */
-    private final AtomicBoolean bufferTransportThreadIsDoingWork = new AtomicBoolean(
-            false);
 
     /**
      * The inventory contains a collection of all the records that have ever
@@ -480,13 +472,22 @@ public final class Engine extends BufferedStore implements
         }
     }
 
+    /**
+     * Public interface for the {@link browse()} method.
+     * 
+     * @return Set of records
+     */
+    public Set<Long> browse() {
+        return inventory.getAll();
+    }
+
     @Override
-    public Map<String, Set<TObject>> browse(long record) {
+    public Map<String, Set<TObject>> select(long record) {
         transportLock.readLock().lock();
         Lock read = lockService.getReadLock(record);
         read.lock();
         try {
-            return super.browse(record);
+            return super.select(record);
         }
         finally {
             read.unlock();
@@ -495,10 +496,10 @@ public final class Engine extends BufferedStore implements
     }
 
     @Override
-    public Map<String, Set<TObject>> browse(long record, long timestamp) {
+    public Map<String, Set<TObject>> select(long record, long timestamp) {
         transportLock.readLock().lock();
         try {
-            return super.browse(record, timestamp);
+            return super.select(record, timestamp);
         }
         finally {
             transportLock.readLock().unlock();
@@ -536,7 +537,7 @@ public final class Engine extends BufferedStore implements
     public Map<String, Set<TObject>> browseUnsafe(long record) {
         transportLock.readLock().lock();
         try {
-            return super.browse(record);
+            return super.select(record);
         }
         finally {
             transportLock.readLock().unlock();
@@ -581,12 +582,12 @@ public final class Engine extends BufferedStore implements
     }
 
     @Override
-    public Set<TObject> fetch(String key, long record) {
+    public Set<TObject> select(String key, long record) {
         transportLock.readLock().lock();
         Lock read = lockService.getReadLock(key, record);
         read.lock();
         try {
-            return super.fetch(key, record);
+            return super.select(key, record);
         }
         finally {
             read.unlock();
@@ -595,10 +596,10 @@ public final class Engine extends BufferedStore implements
     }
 
     @Override
-    public Set<TObject> fetch(String key, long record, long timestamp) {
+    public Set<TObject> select(String key, long record, long timestamp) {
         transportLock.readLock().lock();
         try {
-            return super.fetch(key, record, timestamp);
+            return super.select(key, record, timestamp);
         }
         finally {
             transportLock.readLock().unlock();
@@ -609,7 +610,7 @@ public final class Engine extends BufferedStore implements
     public Set<TObject> fetchUnsafe(String key, long record) {
         transportLock.readLock().lock();
         try {
-            return super.fetch(key, record);
+            return super.select(key, record);
         }
         finally {
             transportLock.readLock().unlock();
@@ -634,15 +635,6 @@ public final class Engine extends BufferedStore implements
             sb.append(System.getProperty("line.separator"));
         }
         return sb.toString();
-    }
-
-    /**
-     * Public interface for the {@link browse()} method.
-     * 
-     * @return Set of records
-     */
-    public Set<Long> browse() {
-        return inventory.getAll();
     }    
     
     @Override
@@ -1021,7 +1013,7 @@ public final class Engine extends BufferedStore implements
      * A thread that is responsible for transporting content from
      * {@link #buffer} to {@link #destination}.
      * 
-     * @author jnelson
+     * @author Jeff Nelson
      */
     private class BufferTransportThread extends Thread {
 

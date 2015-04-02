@@ -1,32 +1,22 @@
 /*
- * The MIT License (MIT)
- * 
- * Copyright (c) 2013-2015 Jeff Nelson, Cinchapi Software Collective
- * 
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- * 
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- * 
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
+ * Copyright (c) 2013-2015 Cinchapi, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 package org.cinchapi.concourse.server.storage;
 
 import java.io.File;
 import java.lang.reflect.Method;
-import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -57,7 +47,7 @@ import com.google.common.collect.Sets;
 /**
  * Unit tests for {@link Engine}.
  * 
- * @author jnelson
+ * @author Jeff Nelson
  */
 public class EngineTest extends BufferedStoreTest {
 
@@ -206,7 +196,7 @@ public class EngineTest extends BufferedStoreTest {
          engine.add("name", Convert.javaToThrift("abcd"), 3);
          engine.add("name", Convert.javaToThrift("abce"), 4);
          engine.remove("name", Convert.javaToThrift("xyz"), 2);
-         Assert.assertTrue(engine.browse(2).isEmpty()); //assert record presently has no data
+         Assert.assertTrue(engine.select(2).isEmpty()); //assert record presently has no data
          Assert.assertEquals(engine.browse(), Sets.<Long>newHashSet(new Long(1), new Long(2), new Long(3), new Long(4)));
      }
 
@@ -287,9 +277,9 @@ public class EngineTest extends BufferedStoreTest {
             @Override
             public void run() {
                 go.set(true);
-                Map<String, Set<TObject>> data = engine.browse(1);
+                Map<String, Set<TObject>> data = engine.select(1);
                 done.set(true);
-                Map<String, Set<TObject>> data1 = engine.browse(1);
+                Map<String, Set<TObject>> data1 = engine.select(1);
                 Variables.register("data_size", data.size());
                 Variables.register("data1_size", data1.size());
                 succeeded.set(data.size() == data1.size()

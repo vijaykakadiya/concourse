@@ -1,25 +1,17 @@
 /*
- * The MIT License (MIT)
- * 
- * Copyright (c) 2013-2015 Jeff Nelson, Cinchapi Software Collective
- * 
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- * 
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- * 
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
+ * Copyright (c) 2013-2015 Cinchapi, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 package org.cinchapi.concourse.server.storage;
 
@@ -33,6 +25,7 @@ import org.cinchapi.concourse.server.storage.temp.Write;
 import org.cinchapi.concourse.thrift.Operator;
 import org.cinchapi.concourse.thrift.TObject;
 import org.cinchapi.concourse.time.Time;
+import org.cinchapi.concourse.util.DataServices;
 
 import com.google.common.collect.Sets;
 
@@ -49,7 +42,7 @@ import com.google.common.collect.Sets;
  * read from the buffer and the destination.
  * </p>
  * 
- * @author jnelson
+ * @author Jeff Nelson
  */
 public abstract class BufferedStore extends BaseStore {
 
@@ -140,13 +133,13 @@ public abstract class BufferedStore extends BaseStore {
     }
 
     @Override
-    public Map<String, Set<TObject>> browse(long record) {
+    public Map<String, Set<TObject>> select(long record) {
         return browse(record, false);
     }
 
     @Override
-    public Map<String, Set<TObject>> browse(long record, long timestamp) {
-        Map<String, Set<TObject>> context = destination.browse(record,
+    public Map<String, Set<TObject>> select(long record, long timestamp) {
+        Map<String, Set<TObject>> context = destination.select(record,
                 timestamp);
         return buffer.browse(record, timestamp, context);
     }
@@ -163,13 +156,13 @@ public abstract class BufferedStore extends BaseStore {
     }
 
     @Override
-    public Set<TObject> fetch(String key, long record) {
+    public Set<TObject> select(String key, long record) {
         return fetch(key, record, false);
     }
 
     @Override
-    public Set<TObject> fetch(String key, long record, long timestamp) {
-        Set<TObject> context = destination.fetch(key, record, timestamp);
+    public Set<TObject> select(String key, long record, long timestamp) {
+        Set<TObject> context = destination.select(key, record, timestamp);
         return buffer.fetch(key, record, timestamp, context);
     }
 
@@ -211,7 +204,8 @@ public abstract class BufferedStore extends BaseStore {
      * @param record
      */
     public void set(String key, TObject value, long record) {
-        Set<TObject> values = fetch(key, record);
+        DataServices.sanityCheck(key, value);
+        Set<TObject> values = select(key, record);
         for (TObject val : values) {
             buffer.insert(Write.remove(key, val, record)); /* Authorized */
         }
@@ -252,6 +246,7 @@ public abstract class BufferedStore extends BaseStore {
      */
     protected boolean add(String key, TObject value, long record, boolean sync,
             boolean validate) {
+        DataServices.sanityCheck(key, value);
         Write write = Write.add(key, value, record);
         if(!validate || !verify(write)) {
             return buffer.insert(write, sync); /* Authorized */
@@ -341,7 +336,7 @@ public abstract class BufferedStore extends BaseStore {
             context = ((Compoundable) (destination)).browseUnsafe(record);
         }
         else {
-            context = destination.browse(record);
+            context = destination.select(record);
         }
         return buffer.browse(record, Time.now(), context);
     }
@@ -427,31 +422,9 @@ public abstract class BufferedStore extends BaseStore {
             context = ((Compoundable) (destination)).fetchUnsafe(key, record);
         }
         else {
-            context = destination.fetch(key, record);
+            context = destination.select(key, record);
         }
         return buffer.fetch(key, record, Time.now(), context);
-    }
-
-    /**
-     * Remove {@code key} as {@code value} from {@code record} with the
-     * directive to {@code sync} the data or not. Depending upon the
-     * implementation of the {@link #buffer}, a sync may guarantee that the data
-     * is durably stored.
-     * <p>
-     * This method deletes the mapping from {@code key} to {@code value} in
-     * {@code record}, if that mapping <em>currently</em> exists (i.e.
-     * {@link #verify(String, Object, long)} is {@code true}. No other mappings
-     * from {@code key} in {@code record} are affected.
-     * 
-     * @return {@code true} if the mapping is removed
-     */
-    protected boolean remove(String key, TObject value, long record,
-            boolean sync) {
-        Write write = Write.remove(key, value, record);
-        if(verify(write)) {
-            return buffer.insert(write, sync); /* Authorized */
-        }
-        return false;
     }
 
     /**
@@ -475,6 +448,7 @@ public abstract class BufferedStore extends BaseStore {
      */
     protected boolean remove(String key, TObject value, long record,
             boolean sync, boolean validate) {
+        DataServices.sanityCheck(key, value);
         Write write = Write.remove(key, value, record);
         if(!validate || verify(write)) {
             return buffer.insert(write, sync); /* Authorized */
@@ -488,7 +462,7 @@ public abstract class BufferedStore extends BaseStore {
      * <p>
      * This method checks that there is <em>currently</em> a mapping from
      * {@code key} to {@code value} in {@code record}. This method has the same
-     * affect as calling {@link #fetch(String, long)}
+     * affect as calling {@link #select(String, long)}
      * {@link Set#contains(Object)}.
      * </p>
      * 

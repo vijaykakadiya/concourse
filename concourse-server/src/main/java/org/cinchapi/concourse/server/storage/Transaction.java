@@ -1,25 +1,17 @@
 /*
- * The MIT License (MIT)
- * 
- * Copyright (c) 2013-2015 Jeff Nelson, Cinchapi Software Collective
- * 
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- * 
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- * 
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
+ * Copyright (c) 2013-2015 Cinchapi, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 package org.cinchapi.concourse.server.storage;
 
@@ -50,13 +42,15 @@ import org.cinchapi.concourse.util.ByteBuffers;
 import org.cinchapi.concourse.util.Logger;
 
 import com.google.common.base.Throwables;
+import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Maps;
+import com.google.common.collect.Multimap;
 
 /**
  * An {@link AtomicOperation} that performs backups prior to commit to make sure
  * that it is durable in the event of crash, power loss or failure.
  * 
- * @author jnelson
+ * @author Jeff Nelson
  */
 public final class Transaction extends AtomicOperation implements Compoundable {
     // NOTE: Because Transaction's rely on JIT locking, the unsafe methods call
@@ -101,6 +95,16 @@ public final class Transaction extends AtomicOperation implements Compoundable {
     public static Transaction start(Engine engine) {
         return new Transaction(engine);
     }
+
+    /**
+     * The Transaction "manages" the version change listeners for each of its
+     * Atomic Operations. Since the Transaction is registered with the Engine
+     * for version change notifications for each action of each of its atomic
+     * operations, the Transaction must intercept any notifications that would
+     * affect an atomic operation that has not committed.
+     */
+    private Multimap<AtomicOperation, Token> managedVersionChangeListeners = HashMultimap
+            .create();
 
     /**
      * The unique Transaction id.
@@ -154,7 +158,45 @@ public final class Transaction extends AtomicOperation implements Compoundable {
     @Override
     @Restricted
     public void addVersionChangeListener(Token token,
-            VersionChangeListener listener) {}
+            VersionChangeListener listener) {
+        // The Transaction is added as a version change listener for each of its
+        // atomic operation reads/writes by virtue of the fact that the atomic
+        // operations (via BufferedStore) call the analogous read/write methods
+        // in the Transaction, which registers the Transaction with
+        // the Engine as a version change listener.
+        managedVersionChangeListeners.put((AtomicOperation) listener, token);
+    }
+
+    @Override
+    public Map<Long, String> auditUnsafe(long record) {
+        return audit(record);
+    }
+
+    @Override
+    public Map<Long, String> auditUnsafe(String key, long record) {
+        return audit(key, record);
+    }
+
+    @Override
+    public Map<String, Set<TObject>> browseUnsafe(long record) {
+        return select(record);
+    }
+
+    @Override
+    public Map<TObject, Set<Long>> browseUnsafe(String key) {
+        return browse(key);
+    }
+
+    @Override
+    public Map<Long, Set<TObject>> doExploreUnsafe(String key,
+            Operator operator, TObject... values) {
+        return doExplore(key, operator, values);
+    }
+
+    @Override
+    public Set<TObject> fetchUnsafe(String key, long record) {
+        return select(key, record);
+    }
 
     @Override
     public long getVersion(long record) {
@@ -179,48 +221,31 @@ public final class Transaction extends AtomicOperation implements Compoundable {
     public void notifyVersionChange(Token token) {}
 
     @Override
+    public void onVersionChange(Token token) {
+        boolean callSuper = true;
+        for (AtomicOperation operation : managedVersionChangeListeners.keySet()) {
+            for (Token tok : managedVersionChangeListeners.get(operation)) {
+                if(tok.equals(token)) {
+                    operation.onVersionChange(tok);
+                    managedVersionChangeListeners.remove(operation, tok);
+                    callSuper = false;
+                    break;
+                }
+            }
+        }
+        if(callSuper) {
+            super.onVersionChange(token);
+        }
+    }
+
+    @Override
     @Restricted
     public void removeVersionChangeListener(Token token,
             VersionChangeListener listener) {}
 
     @Override
-    public Map<Long, String> auditUnsafe(long record) {
-        return audit(record);
-    }
-
-    @Override
-    public Map<Long, String> auditUnsafe(String key, long record) {
-        return audit(key, record);
-    }
-
-    @Override
-    public Map<String, Set<TObject>> browseUnsafe(long record) {
-        return browse(record);
-    }
-
-    @Override
-    public Map<TObject, Set<Long>> browseUnsafe(String key) {
-        return browse(key);
-    }
-
-    @Override
-    public Map<Long, Set<TObject>> doExploreUnsafe(String key,
-            Operator operator, TObject... values) {
-        return doExplore(key, operator, values);
-    }
-
-    @Override
-    public Set<TObject> fetchUnsafe(String key, long record) {
-        return fetch(key, record);
-    }
-
-    @Override
-    public boolean verifyUnsafe(String key, TObject value, long record) {
-        return verify(key, value, record);
-    }
-
-    @Override
     public AtomicOperation startAtomicOperation() {
+        checkState();
         AtomicOperation operation = AtomicOperation.start(this);
         operation.lockService = LockService.noOp();
         operation.rangeLockService = RangeLockService.noOp();
@@ -233,6 +258,11 @@ public final class Transaction extends AtomicOperation implements Compoundable {
     @Override
     public String toString() {
         return id;
+    }
+
+    @Override
+    public boolean verifyUnsafe(String key, TObject value, long record) {
+        return verify(key, value, record);
     }
 
     /**
@@ -317,6 +347,16 @@ public final class Transaction extends AtomicOperation implements Compoundable {
         finally {
             FileSystem.closeFileChannel(channel);
         }
+    }
+
+    /**
+     * Perform cleanup for the atomic {@code operation} that was birthed from
+     * this transaction and has successfully committed.
+     * 
+     * @param operation
+     */
+    protected void onCommit(AtomicOperation operation) {
+        managedVersionChangeListeners.removeAll(operation);
     }
 
 }
